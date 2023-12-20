@@ -1,0 +1,108 @@
+"""Pandas provides the option to create a dataframe from the dataset"""
+import unittest
+from unittest.mock import patch
+import pandas as pd
+import openai
+
+class BoardGameMechanicsAnalyzer:
+    """This class contains methods to analyze the data of BoardGameGeek"""
+    def __init__(self, dataset_path, api_key):
+        self.dataset_path = dataset_path
+        self.api_key = api_key
+        self.data_frame = pd.read_csv(self.dataset_path, sep=";")
+        self.data_frame = self.data_frame.dropna(subset=['Name', 'Year Published', 'Mechanics'])
+        openai.api_key = self.api_key
+
+    def get_mechanics_list(self, game_name):
+        """This function puts the mechanics of the game in a list"""
+        mechanics_temp = self.data_frame.loc[self.data_frame['Name'] == game_name, 'Mechanics'].iloc[0]
+        mechanics_list = mechanics_temp.split(", ")
+        return mechanics_list
+
+    def report_response(self, game_name):
+        """This method composes the prompt, requests the method send_prompt() and prints the response"""
+        prompt = f"Which mechanics of this list are actually associated to the game {game_name}? Please only return the mechanics that are associated with the game in one sentence."
+        response = self.send_prompt(prompt, game_name)
+        print(response)
+        return response
+
+    def send_prompt(self, prompt, game_name):
+        """This method finishes the prompt, sends it to openai and returns only the response"""
+        mechanics_list = self.get_mechanics_list(game_name)
+        prompt += f"\n The list contains the mechanics: {mechanics_list}"
+        response = openai.Completion.create(engine="text-davinci-002", prompt=prompt, max_tokens=200, n=1)
+        return response.choices[0].text.strip()
+
+    def calculate_accuracy(self, game_name, response):
+        """This method returns the accuracy of openai's response by calculating the percentage of the amount of mechanics that are named in the response"""
+        terms = 0
+        mechanics_list = self.get_mechanics_list(game_name)
+        for i in mechanics_list:
+            if i in response:
+                terms += 1
+            elif i.lower() in response:
+                terms += 1
+        accuracy_ratio = terms / len(mechanics_list)
+        return accuracy_ratio
+
+    def determine_accuracy_games(self, game_list):
+        """This method requests the method report_response() and prints the accuracy ratio"""
+        for game_info in game_list:
+            game_name = game_info[0]
+            game_year = game_info[1]
+            response = self.report_response(game_name)
+            accuracy_ratio = self.calculate_accuracy(game_name, response)
+            print(f"Accuracy ratio for {game_name} from {game_year}: {accuracy_ratio * 100}%")
+    
+    def analyze_ratings(self):
+        """This method calculates the average accuracy ratio of the 200 highest rated games"""
+        df = self.data_frame
+        df["Rating Average"] = df["Rating Average"].replace({",":"."}, regex=True)
+        df["Rating Average"] = df["Rating Average"].astype(float)
+        df = df.sort_values(by="Rating Average", ascending=False)
+        top200 = df.head(200)
+        average_rating_top200 = (top200["Rating Average"].sum()) / 200
+        average_rating_top200 = average_rating_top200.round(3)
+        print("Average rating of the top 200 games: ", average_rating_top200)
+
+#In order to run this code, make sure to replace the comments with the correct location of bgg_dataset.csv and API key
+t = BoardGameMechanicsAnalyzer(#"Place here the location of bgg_dataset.csv", #"place here the API key")
+
+game_list = [("Crokinole", 1876), ("Gloomhaven", 2017)]
+t.determine_accuracy_games(game_list)
+t.analyze_ratings()
+
+class TestBoardGameMechanicsAnalyzer(unittest.TestCase):
+    """This class contains methods to test the BoardGameMechanicsAnalyzer class"""
+    #In order to run this code, make sure to replace the comments with the correct location of bgg_dataset.csv and API key
+    t = BoardGameMechanicsAnalyzer(#"Place here the location of bgg_dataset.csv", #"place here the API key")
+
+    def test_get_mechanics_list(self):
+        """Unit test 1: it ensures that the mechanicslist contains the actual mechanics that are stored in the dataset"""
+        mechanics_list = t.get_mechanics_list("Crokinole")
+        expected_mechanics_list = ["Flicking", "Team-Based Game"]
+        self.assertEqual(mechanics_list, expected_mechanics_list)
+
+    def test_report_response(self):
+        """Unit test 2: it ensures that the openai API gives a response that is not None"""
+        with patch.object(BoardGameMechanicsAnalyzer, "report_response", return_value = not None) as mock_report_response:
+            game_name = "Crokinole"
+            response = t.report_response(game_name)
+            mock_report_response.assert_called_once()
+            assert response is not None
+    
+    def test_calculate_accuracy(self):
+        """Unit test 3: it ensures that the calculated accuracy ratio is correct"""
+        game_name = "Crokinole"
+        response = "Some text mentioning flicking"
+        accuracy_ratio = t.calculate_accuracy(game_name, response)
+        self.assertEqual(accuracy_ratio, 0.5)
+        response = "Some text not mentioning any mechanics"
+        accuracy_ratio = t.calculate_accuracy(game_name, response)
+        self.assertEqual(accuracy_ratio, 0)
+        response = "Some text mentioning both flicking and team-based game"
+        accuracy_ratio = t.calculate_accuracy(game_name, response)
+        self.assertEqual(accuracy_ratio, 1)
+
+if __name__ == '__main__':
+    unittest.main()
